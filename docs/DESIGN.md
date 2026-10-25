@@ -124,14 +124,13 @@ PRAGMA user_version = 1;           -- schema version for future migrations
 
 **`ForegroundAppProbe.GetForegroundApp()`** returns `(ProcessName, DisplayName, ExePath)` or `null`:
 1. `hwnd = GetForegroundWindow()`. If it's zero, return `null` (R5).
-2. `GetWindowThreadProcessId(hwnd, out pid)`.
-3. **UWP (R9):** if the process is `ApplicationFrameHost`, `EnumChildWindows(hwnd)` and take the first child whose PID differs. Fall back to the host if none is found.
-4. `Process.GetProcessById(pid).ProcessName`. This works for elevated processes too (R11). If the process has already exited, return `null`.
-5. Display name, cached per process name for the tracker's lifetime:
-   - `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `QueryFullProcessImageName` to get the exe path.
+2. `GetWindowThreadProcessId(hwnd, out pid)`. If the window and PID are the same as the last tick, reuse the last answer.
+3. `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `QueryFullProcessImageName` gives the exe path. The process name is the file name without `.exe`. If the path can't be read, fall back to `Process.GetProcessById(pid).ProcessName`, which works for elevated processes too (R11). If the process has already exited, return `null`.
+4. **UWP (R9):** if the process is `ApplicationFrameHost`, walk the frame's direct child windows with `FindWindowEx` and take the first child whose PID differs. Fall back to the host if none is found; that fallback isn't cached, so the next tick looks again.
+5. Display name, cached per process name for the tracker's lifetime once a path has been seen:
    - `FileVersionInfo.GetVersionInfo(path).FileDescription` when it's non-empty, otherwise the process name (R8).
    - `explorer.exe` reports "Windows Explorer" this way, which satisfies R10 without special-casing.
-6. Any exception means `null` for this sample (N6).
+6. Any exception is caught by the tick's guard and logged (N6).
 
 **Session state (R3)** comes from `SystemEvents`, which `TrayContext` turns into calls on the engine:
 
@@ -150,8 +149,10 @@ Locked and suspended are tracked **separately**. The PC usually locks before it 
 The engine is pure: it takes `now` and input samples as arguments and writes through an `ISessionSink` interface. `SessionStore` implements the interface in production, and a fake records calls in tests.
 
 ```csharp
+// ScreenTime.Core (Models.cs), so SessionStore can implement it
+record ForegroundApp(string ProcessName, string DisplayName, string? ExePath);
 interface ISessionSink {
-    long Open(string processName, string displayName, string? exePath, long startUtc); // returns session id
+    long Open(ForegroundApp app, long startUtc); // returns session id
     void UpdateEnd(long sessionId, long endUtc);
 }
 
@@ -272,7 +273,7 @@ The dashboard opens a fresh connection for each refresh and closes it afterwards
 | R17, R18 | `Stats` day/hour bounds via `TimeZoneInfo.Local` |
 | R19 | named mutex |
 | R20, R22 | `StartupRegistration`, `TrayContext` |
-| R21, N3 | `AppPaths` under `%LOCALAPPDATA%` |
+| R21, N3 | `AppPaths` under `%LOCALAPPDATA%` (`ScreenTime-Dev` for Debug builds) |
 | D1–D7 | `MainForm`, `SettingsForm`, `Stats` |
 | N1 | 1 s timer, cached display names, no hooks or threads |
 | N2 | titles are never read; no network code |

@@ -91,7 +91,7 @@ The work is split into six phases. Each one ends in something that builds and ca
 ## Phase 3: Tracker app (Windows plumbing)
 
 **Tasks**
-1. `Native.cs`: P/Invoke for `GetForegroundWindow`, `GetWindowThreadProcessId`, `EnumChildWindows`, `GetLastInputInfo`, `OpenProcess`, `QueryFullProcessImageName` and `CloseHandle`, using `LibraryImport`.
+1. `Native.cs`: P/Invoke for `GetForegroundWindow`, `GetWindowThreadProcessId`, `FindWindowEx`, `GetLastInputInfo`, `OpenProcess`, `QueryFullProcessImageName`, `CloseHandle` and `DestroyIcon`, using `LibraryImport`.
 2. `IdleProbe`: last input time in UTC, with handling for the tick counter wrap.
 3. `ForegroundAppProbe`: the steps in DESIGN §4.3, including the ApplicationFrameHost child lookup and the display-name cache.
 4. `StartupRegistration`: `IsEnabled`, `Enable` and `Disable` on the `HKCU\...\Run` value `ScreenTime`.
@@ -102,9 +102,11 @@ The work is split into six phases. Each one ends in something that builds and ca
    - Settings reload every 60 ticks.
    - Per-tick `try/catch` that writes to `tracker.log` (1 MB roll-over).
 6. `Program.Main`: single-instance mutex (R19), first-run start-at-login (R20), then run `TrayContext`.
-7. Tray icon: an embedded `.ico` (simple clock glyph) so it's recognizable in the tray.
+7. Tray icon: a simple clock glyph drawn at runtime, blue while tracking and grey while paused. No binary asset needed.
+8. Debug builds use `%LOCALAPPDATA%\ScreenTime-Dev` and never register start-at-login, so development runs don't touch real data or the registry.
 
-**Manual checks** (inspect the database with a small `--dump-today` debug command in the tracker that prints today's sessions to the console, or with the dashboard once Phase 4 is done)
+**Manual checks.** Inspect the data with `ScreenTime.Tracker.exe --dump-today`, or with the dashboard once Phase 4 is done. The tracker is a GUI exe, so redirect its output:
+`Start-Process .\ScreenTime.Tracker.exe -ArgumentList '--dump-today' -Wait -NoNewWindow -RedirectStandardOutput dump.txt; Get-Content dump.txt`
 - [ ] Switching between three apps for about 30 s each gives three sessions with the right names.
 - [ ] Clicking the desktop and taskbar records "Windows Explorer" (R10).
 - [ ] Calculator records as Calculator, not ApplicationFrameHost (R9).
