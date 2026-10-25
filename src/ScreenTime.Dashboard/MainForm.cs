@@ -214,12 +214,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            // A fresh connection per refresh, so the dashboard never holds the database open.
-            using var db = Db.Open(_paths);
-            var stats = new Stats(db);
-            var summary = stats.GetDay(day);
-            var week = stats.GetDailyTotals(day, WeekDays);
-
+            var (summary, week) = LoadDay(day);
             ShowTotal(summary);
             ShowAppList(summary);
             DrawApps(summary);
@@ -231,6 +226,27 @@ internal sealed class MainForm : Form
         {
             _statusLabel.Text = $"Couldn't read screen time data: {e.Message}";
         }
+    }
+
+    /// <summary>
+    /// Reads one day and its week through a short-lived read-only connection, so the dashboard
+    /// never holds the database open and can never write to it. Before the tracker has created
+    /// the database, every day is simply empty (D7).
+    /// </summary>
+    private (DaySummary Summary, IReadOnlyList<DailyTotal> Week) LoadDay(DateOnly day)
+    {
+        if (!File.Exists(_paths.DatabasePath))
+        {
+            var emptyDay = new DaySummary(day, TimeSpan.Zero, [], Enumerable.Repeat(TimeSpan.Zero, 24).ToList());
+            var emptyWeek = Enumerable.Range(0, WeekDays)
+                .Select(i => new DailyTotal(day.AddDays(i - (WeekDays - 1)), TimeSpan.Zero))
+                .ToList();
+            return (emptyDay, emptyWeek);
+        }
+
+        using var db = Db.OpenReadOnly(_paths);
+        var stats = new Stats(db);
+        return (stats.GetDay(day), stats.GetDailyTotals(day, WeekDays));
     }
 
     private void ShowTotal(DaySummary summary)

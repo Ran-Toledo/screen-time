@@ -9,7 +9,8 @@ public interface ISessionSink
     /// <summary>Starts a session with end = start and returns its id.</summary>
     long Open(ForegroundApp app, long startUtc);
 
-    void UpdateEnd(long sessionId, long endUtc);
+    /// <summary>Sets the session's end. Returns false if the session no longer exists.</summary>
+    bool UpdateEnd(long sessionId, long endUtc);
 }
 
 /// <summary>One app's screen time within a period.</summary>

@@ -233,14 +233,54 @@ public class TrackerEngineTests
         Assert.Equal(("appa", 0L, 5L), sim.Rel(Assert.Single(sim.Sessions)));
     }
 
+    [Fact] // the 2026-10-25 incident: the open session's row vanished from the database
+    public void A_vanished_session_is_recreated_from_its_start_at_the_next_flush()
+    {
+        var sim = new Sim();
+        sim.Active(A, 30);
+        sim.Sink.Lose(sim.Sessions[0].Id);
+        sim.Active(A, 40);          // flush at 60 finds the row missing
+        sim.Stop();
+
+        Assert.Equal(("appa", 0L, 70L), sim.Rel(Assert.Single(sim.Sessions)));
+        Assert.Contains("missing", Assert.Single(sim.Warnings));
+    }
+
+    [Fact]
+    public void A_vanished_session_is_recreated_when_it_closes()
+    {
+        var sim = new Sim();
+        sim.Active(A, 10);
+        sim.Sink.Lose(sim.Sessions[0].Id);
+        sim.Active(B, 5);           // switching closes A
+
+        sim.Stop();
+
+        // A is re-created while closing, before B opens.
+        Assert.Equal([("appa", 0L, 10L), ("appb", 10L, 15L)], sim.Sessions.Select(sim.Rel));
+        Assert.Single(sim.Warnings);
+    }
+
+    [Fact]
+    public void No_warnings_in_normal_operation()
+    {
+        var sim = new Sim();
+        sim.Active(A, 100);
+        sim.Active(B, 100);
+        sim.Stop();
+
+        Assert.Empty(sim.Warnings);
+    }
+
     /// <summary>Drives the engine one tick per simulated second.</summary>
     private sealed class Sim
     {
         public const long T0 = 1_800_000_000;
 
-        public Sim() => Engine = new TrackerEngine(Sink);
+        public Sim() => Engine = new TrackerEngine(Sink, Warnings.Add);
 
         public FakeSink Sink { get; } = new();
+        public List<string> Warnings { get; } = [];
         public TrackerEngine Engine { get; }
         public long Now { get; set; } = T0;
         public long LastInput { get; private set; } = T0;
@@ -281,6 +321,8 @@ public class TrackerEngineTests
             public long End { get; set; } = Start;
         }
 
+        private long _nextId = 1;
+
         public List<Session> Sessions { get; } = [];
         public List<(long Id, long End)> Updates { get; } = [];
         public bool FailNextOpen { get; set; }
@@ -292,15 +334,22 @@ public class TrackerEngineTests
                 FailNextOpen = false;
                 throw new InvalidOperationException("simulated database failure");
             }
-            var session = new Session(Sessions.Count + 1, app, startUtc);
+            var session = new Session(_nextId++, app, startUtc);
             Sessions.Add(session);
             return session.Id;
         }
 
-        public void UpdateEnd(long sessionId, long endUtc)
+        public bool UpdateEnd(long sessionId, long endUtc)
         {
-            Sessions.Single(s => s.Id == sessionId).End = endUtc;
+            var session = Sessions.SingleOrDefault(s => s.Id == sessionId);
+            if (session is null)
+                return false;
+            session.End = endUtc;
             Updates.Add((sessionId, endUtc));
+            return true;
         }
+
+        /// <summary>Simulates the row disappearing from the database.</summary>
+        public void Lose(long sessionId) => Sessions.RemoveAll(s => s.Id == sessionId);
     }
 }

@@ -24,7 +24,6 @@ public class StoreTests
         using var db = new TestDb();
         var first = db.Sessions.GetOrCreateApp(new ForegroundApp("Chrome", "Google Chrome", null));
 
-        // A new store has an empty cache, so this exercises the database's NOCASE uniqueness.
         db.Reopen();
         var second = db.Sessions.GetOrCreateApp(new ForegroundApp("chrome", "Google Chrome", null));
 
@@ -56,6 +55,71 @@ public class StoreTests
 
         db.Sessions.UpdateEnd(id, 1_060);
         Assert.Equal((1_000L, 1_060L), ReadSession(db, id));
+    }
+
+    [Fact] // the 2026-10-25 incident: ids reused after the tables were emptied underneath the tracker
+    public void App_ids_stay_correct_when_the_database_changes_underneath()
+    {
+        using var db = new TestDb();
+        var explorer = new ForegroundApp("explorer", "Windows Explorer", null);
+        db.Sessions.Open(new ForegroundApp("chrome", "Google Chrome", null), 100);
+        db.Sessions.Open(explorer, 200);
+
+        // Another connection empties the tables and a different app takes id 1.
+        using (var other = Db.Open(db.Paths))
+        {
+            using var wipe = other.CreateCommand();
+            wipe.CommandText = "DELETE FROM sessions; DELETE FROM apps;";
+            wipe.ExecuteNonQuery();
+            new SessionStore(other).Open(new ForegroundApp("SearchHost", "SearchHost", null), 300);
+        }
+
+        var id = db.Sessions.Open(explorer, 400);
+
+        using var command = db.Connection.CreateCommand();
+        command.CommandText = "SELECT a.process_name FROM sessions s JOIN apps a ON a.id = s.app_id WHERE s.id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        Assert.Equal("explorer", command.ExecuteScalar());
+    }
+
+    [Fact]
+    public void UpdateEnd_reports_whether_the_session_exists()
+    {
+        using var db = new TestDb();
+        var id = db.Sessions.Open(new ForegroundApp("notepad", "Notepad", null), 1_000);
+
+        Assert.True(db.Sessions.UpdateEnd(id, 1_010));
+        Assert.False(db.Sessions.UpdateEnd(id + 100, 1_010));
+    }
+
+    [Fact]
+    public void Read_only_connection_sees_tracker_writes_but_cannot_write()
+    {
+        using var db = new TestDb();
+        db.AddSession("chrome", 100, 200);
+
+        using var reader = Db.OpenReadOnly(db.Paths);
+        using var count = reader.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM sessions;";
+        Assert.Equal(1L, (long)count.ExecuteScalar()!);
+
+        // The writer keeps going while the reader is open.
+        db.AddSession("code", 200, 300);
+        Assert.Equal(2L, (long)count.ExecuteScalar()!);
+
+        using var write = reader.CreateCommand();
+        write.CommandText = "DELETE FROM sessions;";
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => write.ExecuteNonQuery());
+    }
+
+    [Fact]
+    public void Read_only_open_of_a_missing_database_throws_and_creates_nothing()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "ScreenTime.Tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(folder);
+
+        Assert.Throws<FileNotFoundException>(() => Db.OpenReadOnly(paths));
+        Assert.False(Directory.Exists(folder));
     }
 
     [Fact]

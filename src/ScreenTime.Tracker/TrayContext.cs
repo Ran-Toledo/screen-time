@@ -30,7 +30,7 @@ internal sealed class TrayContext : ApplicationContext
         _log = new TrackerLog(paths.TrackerLogPath);
         _db = Db.Open(paths);
         _settings = new SettingsStore(_db);
-        _engine = new TrackerEngine(new SessionStore(_db))
+        _engine = new TrackerEngine(new SessionStore(_db), _log.Write)
         {
             IdleThresholdSeconds = _settings.GetIdleThresholdSeconds(),
         };

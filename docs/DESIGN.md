@@ -15,6 +15,7 @@
 
 - The two programs communicate **only through the SQLite file**: no ports, pipes or other IPC.
 - The tracker writes sessions and reads settings. The dashboard reads sessions and writes settings.
+- **The tracker is the only long-lived writer.** The dashboard and `--dump-today` open the database **read-only** (`Db.OpenReadOnly`), so they can never write to it or checkpoint it. Only saving in the Settings dialog opens a short read-write connection.
 - SQLite in **WAL mode** lets the dashboard read while the tracker writes.
 
 ### Key design choices
@@ -153,7 +154,7 @@ The engine is pure: it takes `now` and input samples as arguments and writes thr
 record ForegroundApp(string ProcessName, string DisplayName, string? ExePath);
 interface ISessionSink {
     long Open(ForegroundApp app, long startUtc); // returns session id
-    void UpdateEnd(long sessionId, long endUtc);
+    bool UpdateEnd(long sessionId, long endUtc); // false if the row no longer exists
 }
 
 sealed class TrackerEngine {
@@ -198,6 +199,9 @@ Every 60 ticks, `TrayContext` reads `idle_threshold_seconds`, clamps it to 60–
 
 - Every tick runs in a `try/catch`. Exceptions are written to `%LOCALAPPDATA%\ScreenTime\tracker.log`, which is capped at about 1 MB and rolled over by renaming to `.old`. The tracker then continues.
 - Database busy errors are absorbed by `busy_timeout`. If a write still fails, that sample is skipped and the next flush catches up.
+- **The database changing underneath the tracker.** On 2026-10-25 the tracker's recent committed rows disappeared while it was running; the trigger was not identified. Two safeguards follow from it:
+  - `SessionStore` never caches app ids. It looks the app up on every new session, so time can't be stored under the wrong app if ids are reused.
+  - `UpdateEnd` reports whether the session row still exists. If it's gone, the engine re-creates it from the original start time and logs a warning to `tracker.log`. A repeat then shows up in the log instead of going unnoticed.
 
 ## 5. Dashboard
 
@@ -246,7 +250,7 @@ IReadOnlyList<(DateOnly Day, TimeSpan Total)> GetDailyTotals(DateOnly lastDay, i
   - This handles DST and half-hour time zones. On a 23-hour day the skipped hour stays empty. On a 25-hour day the repeated hour adds to the same bucket.
 - **Last 7 days:** call the day total 7 times. Each call is one indexed query, so this is cheap.
 
-The dashboard opens a fresh connection for each refresh and closes it afterwards, so it never holds locks.
+The dashboard opens a fresh **read-only** connection for each refresh and closes it afterwards, so it never holds locks and never writes. Before the tracker has created the database, every day shows as empty.
 
 ## 6. Build and deployment
 

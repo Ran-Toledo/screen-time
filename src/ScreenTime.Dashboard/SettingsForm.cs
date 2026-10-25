@@ -70,9 +70,13 @@ internal sealed class SettingsForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        if (!File.Exists(_paths.DatabasePath))
+            return; // nothing saved yet: keep the default
+
         try
         {
-            using var db = Db.Open(_paths);
+            // Read-only; only Save opens the database for writing.
+            using var db = Db.OpenReadOnly(_paths);
             var minutes = new SettingsStore(db).GetIdleThresholdSeconds() / 60;
             _idleMinutes.Value = Math.Clamp(minutes, (int)_idleMinutes.Minimum, (int)_idleMinutes.Maximum);
         }

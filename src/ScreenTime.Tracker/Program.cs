@@ -28,7 +28,13 @@ static class Program
     /// <summary>Debug aid: prints today's totals and sessions to stdout (redirect it; this is a GUI exe).</summary>
     private static int DumpToday(AppPaths paths)
     {
-        using var db = Db.Open(paths);
+        if (!File.Exists(paths.DatabasePath))
+        {
+            Console.WriteLine($"No database yet at {paths.DatabasePath}");
+            return 1;
+        }
+
+        using var db = Db.OpenReadOnly(paths);
         var today = DateOnly.FromDateTime(DateTime.Now);
         var summary = new Stats(db).GetDay(today);
 

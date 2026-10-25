@@ -32,7 +32,7 @@ The work is split into six phases. Each one ends in something that builds and ca
 1. `AppPaths`: data folder `%LOCALAPPDATA%\ScreenTime`, db path, log path. It accepts an override folder so tests can use a temp directory.
 2. `Db.Open(path)`: creates the folder, applies the PRAGMAs (WAL, `busy_timeout=5000`, `foreign_keys=ON`), and runs the schema script if `user_version = 0`.
 3. `SessionStore` (implements `ISessionSink`):
-   - `GetOrCreateApp`, which caches the process-name → id lookup and updates the display name and path when they change.
+   - `GetOrCreateApp`, which upserts the app and returns its id on every call, with no cache (see DESIGN §4.6), and updates the display name and path when they change.
    - `Open`, which inserts a session with `start = end`.
    - `UpdateEnd`.
 4. `SettingsStore`:

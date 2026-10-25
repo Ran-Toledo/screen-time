@@ -59,6 +59,39 @@ public static class Db
 
     public static SqliteConnection Open(AppPaths paths) => Open(paths.DatabasePath);
 
+    /// <summary>
+    /// Opens an existing database read-only, for the dashboard and --dump-today. A read-only
+    /// connection can never write or checkpoint, so readers can't disturb the tracker's writes.
+    /// Throws <see cref="FileNotFoundException"/> if the tracker hasn't created the database yet.
+    /// </summary>
+    public static SqliteConnection OpenReadOnly(string path)
+    {
+        if (!File.Exists(path))
+            throw new FileNotFoundException("The screen time database doesn't exist yet.", path);
+
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString();
+
+        var connection = new SqliteConnection(connectionString);
+        try
+        {
+            connection.Open();
+            Execute(connection, "PRAGMA busy_timeout=5000;");
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    public static SqliteConnection OpenReadOnly(AppPaths paths) => OpenReadOnly(paths.DatabasePath);
+
     private static void EnsureSchema(SqliteConnection connection)
     {
         if (GetUserVersion(connection) >= SchemaVersion)

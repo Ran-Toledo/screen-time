@@ -7,7 +7,9 @@ namespace ScreenTime.Tracker;
 /// UTC Unix seconds and all writes go through <see cref="ISessionSink"/>, so it can be tested
 /// without Windows. A tick at time t stands for the second [t, t+1).
 /// </summary>
-public sealed class TrackerEngine(ISessionSink sink)
+/// <param name="sink">Where sessions are written.</param>
+/// <param name="warn">Receives a message when the open session had vanished from storage and was re-created.</param>
+public sealed class TrackerEngine(ISessionSink sink, Action<string>? warn = null)
 {
     /// <summary>A longer gap between ticks means the machine slept or froze (R14).</summary>
     public const int MaxTickGapSeconds = 5;
@@ -63,7 +65,7 @@ public sealed class TrackerEngine(ISessionSink sink)
 
         if (_current is not null && nowUtc - _current.LastFlushUtc >= FlushIntervalSeconds)
         {
-            sink.UpdateEnd(_current.Id, nowUtc);
+            WriteEnd(_current, nowUtc);
             _current.LastFlushUtc = nowUtc;
         }
 
@@ -107,12 +109,27 @@ public sealed class TrackerEngine(ISessionSink sink)
         // instead of retrying a broken close on every tick.
         var session = _current;
         _current = null;
-        sink.UpdateEnd(session.Id, Math.Max(endUtc, session.StartUtc));
+        WriteEnd(session, Math.Max(endUtc, session.StartUtc));
+    }
+
+    /// <summary>
+    /// Writes the session's end. If its row has disappeared (the database was reset or rolled
+    /// back underneath us), re-creates it from the original start so the time isn't lost.
+    /// </summary>
+    private void WriteEnd(OpenSession session, long endUtc)
+    {
+        if (sink.UpdateEnd(session.Id, endUtc))
+            return;
+
+        var lostId = session.Id;
+        session.Id = sink.Open(session.App, session.StartUtc);
+        sink.UpdateEnd(session.Id, endUtc);
+        warn?.Invoke($"Session {lostId} ({session.App.ProcessName}) was missing from the database; re-created it as session {session.Id}.");
     }
 
     private sealed class OpenSession(long id, ForegroundApp app, long startUtc)
     {
-        public long Id { get; } = id;
+        public long Id { get; set; } = id;
         public ForegroundApp App { get; } = app;
         public long StartUtc { get; } = startUtc;
         public long LastFlushUtc { get; set; } = startUtc;

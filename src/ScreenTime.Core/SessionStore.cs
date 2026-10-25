@@ -3,21 +3,15 @@ using Microsoft.Data.Sqlite;
 namespace ScreenTime.Core;
 
 /// <summary>Tracker-side writes: apps and sessions. The caller owns the connection.</summary>
+/// <remarks>
+/// App ids are deliberately not cached: they are looked up on every new session, so the
+/// tracker can never attribute time to the wrong app if the database changes underneath it.
+/// </remarks>
 public sealed class SessionStore(SqliteConnection connection) : ISessionSink
 {
-    // Avoids rewriting the apps row on every session for an app we've already seen.
-    private readonly Dictionary<string, (long Id, ForegroundApp App)> _apps = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Returns the app's id, creating it or refreshing its display name and path if they changed (R7, R8).</summary>
+    /// <summary>Returns the app's id, creating it or refreshing its display name and path (R7, R8).</summary>
     public long GetOrCreateApp(ForegroundApp app)
     {
-        if (_apps.TryGetValue(app.ProcessName, out var cached)
-            && cached.App.DisplayName == app.DisplayName
-            && (app.ExePath is null || cached.App.ExePath == app.ExePath))
-        {
-            return cached.Id;
-        }
-
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO apps (process_name, display_name, exe_path) VALUES ($name, $display, $path)
@@ -29,10 +23,7 @@ public sealed class SessionStore(SqliteConnection connection) : ISessionSink
         command.Parameters.AddWithValue("$name", app.ProcessName);
         command.Parameters.AddWithValue("$display", app.DisplayName);
         command.Parameters.AddWithValue("$path", (object?)app.ExePath ?? DBNull.Value);
-
-        var id = (long)command.ExecuteScalar()!;
-        _apps[app.ProcessName] = (id, app);
-        return id;
+        return (long)command.ExecuteScalar()!;
     }
 
     public long Open(ForegroundApp app, long startUtc)
@@ -49,12 +40,12 @@ public sealed class SessionStore(SqliteConnection connection) : ISessionSink
         return (long)command.ExecuteScalar()!;
     }
 
-    public void UpdateEnd(long sessionId, long endUtc)
+    public bool UpdateEnd(long sessionId, long endUtc)
     {
         using var command = connection.CreateCommand();
         command.CommandText = "UPDATE sessions SET end_utc = $end WHERE id = $id;";
         command.Parameters.AddWithValue("$end", endUtc);
         command.Parameters.AddWithValue("$id", sessionId);
-        command.ExecuteNonQuery();
+        return command.ExecuteNonQuery() > 0;
     }
 }
