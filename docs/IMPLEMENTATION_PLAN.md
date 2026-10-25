@@ -124,7 +124,7 @@ The work is split into six phases. Each one ends in something that builds and ca
 ## Phase 4: Dashboard
 
 **Tasks**
-1. Build the `MainForm` layout from DESIGN §5.1 with `TableLayoutPanel` / `SplitContainer` so it resizes cleanly.
+1. Build the `MainForm` layout from DESIGN §5.1 with percentage-based `TableLayoutPanel`s and DPI auto-scaling, so it resizes and scales cleanly. A `SplitContainer` was tried and dropped: its splitter position and the list's column widths don't follow display scaling.
 2. Date navigation: ◀ / ▶ / `DateTimePicker` / Today. ▶ is disabled on today (D2).
 3. Total label and the per-app `ListView` with name, time and % (D3a, D3b).
 4. ScottPlot charts: top-10 apps as horizontal bars, 24 hourly bars, 7 daily bars (D3c, D3d, D4).

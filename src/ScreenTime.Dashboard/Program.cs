@@ -1,3 +1,5 @@
+using ScreenTime.Core;
+
 namespace ScreenTime.Dashboard;
 
 static class Program
@@ -6,7 +8,6 @@ static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
-        // MainForm is added in Phase 4.
-        Application.Run(new Form { Text = "ScreenTime" });
+        Application.Run(new MainForm(new AppPaths()));
     }
 }
